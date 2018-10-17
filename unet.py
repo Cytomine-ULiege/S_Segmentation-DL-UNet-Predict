@@ -1,8 +1,36 @@
+import os
+import cv2
+import numpy as np
+from cytomine.models import AttachedFileCollection, Property
 from keras import Input, Model
 from keras.layers import Convolution2D, LeakyReLU, SpatialDropout2D, AveragePooling2D, UpSampling2D, merge
-from keras.optimizers import Adam
-import numpy as np
-import cv2
+
+
+def load_model(job, download_path, model_filename="weights.hf5"):
+    attached_files = AttachedFileCollection(job).fetch()
+    if not (0 < len(attached_files) < 2):
+        raise ValueError("More or less than 1 file attached to the Job (found {} file(s)).".format(len(attached_files)))
+    attached_file = attached_files[0]
+    if attached_file.filename != model_filename:
+        raise ValueError(
+            "Expected model file name is '{}' (found: '{}').".format(model_filename, attached_file.filename))
+    model_path = os.path.join(download_path, model_filename)
+    attached_file.download(model_path)
+    return model_path
+
+
+def load_property(job, property_name):
+    property = Property(job, key=property_name).fetch()
+    return property.value
+
+
+def load_data(cj, dims, path, **monitor_params):
+    images = sorted(os.listdir(path))  # to make sure that several calls return the same list
+    imgs = np.ndarray([len(images), dims[0], dims[1], dims[2]], dtype=np.float32)
+    for i, image_name in cj.monitor(enumerate(images), **monitor_params):
+        img = cv2.imread(os.path.join(path, image_name))
+        imgs[i, :, :, :] = cv2.resize(img, (dims[1], dims[0]))
+    return images
 
 
 def create_unet(dims):

@@ -11,25 +11,9 @@ from skimage import io
 
 from annotation_exporter import mask_to_objects_2d
 # from neubiaswg5.metrics import computemetrics_batch
-from unet import create_unet
+from unet import create_unet, load_data
 
 
-def load_model(job, download_path, model_filename="weights.hf5"):
-    attached_files = AttachedFileCollection(job).fetch()
-    if not (0 < len(attached_files) < 2):
-        raise ValueError("More or less than 1 file attached to the Job (found {} file(s)).".format(len(attached_files)))
-    attached_file = attached_files[0]
-    if attached_file.filename != model_filename:
-        raise ValueError(
-            "Expected model file name is '{}' (found: '{}').".format(model_filename, attached_file.filename))
-    model_path = os.path.join(download_path, model_filename)
-    attached_file.download(model_path)
-    return model_path
-
-
-def load_property(job, property_name):
-    property = Property(job, key=property_name).fetch()
-    return property.value
 
 
 def main(argv):
@@ -84,13 +68,15 @@ def main(argv):
 
         # load data
         cj.job.update(progress=30, statusComment="Execution: preparing data...")
-        dims = height, width
-        images = os.listdir(in_path)
-        imgs = np.ndarray([len(images), dims[0], dims[1], n_channels], dtype=np.float32)
-        for i, image_name in cj.monitor(enumerate(images), start=35, end=45, period=0.1, prefix="Execution: load and preprocess images"):
-            img = cv2.imread(os.path.join(in_path, image_name))
-            img = cv2.resize(img, (dims[1], dims[0]))
-            imgs[i] = (img.astype(np.float) - train_mean) / train_std
+        dims = height, width, n_channels
+
+        # load input images
+        images = load_data(cj, dims, in_path, **{
+            "start": 35, "end": 45, "period": 0.1,
+            "prefix": "Execution: load training input images"
+        })
+        images -= train_mean
+        images /= train_std
 
         # load model
         cj.job.update(progress=45, statusComment="Execution: build model...")
@@ -100,7 +86,7 @@ def main(argv):
         # inference
         masks = np.zeros([len(images), 1, dims[0], dims[1]], dtype=np.uint8)
         for i, image_name in cj.monitor(enumerate(images), start=45, end=55, period=0.1, prefix="Execution: inference"):
-            masks[i] = unet.predict([imgs[i]])[0]
+            masks[i] = unet.predict([images[i]])[0]
             cv2.imwrite(os.path.join(out_path, image_name), (masks[i] >= cj.parameters.threshold_probas).astype(np.uint8))
 
         # 4. Upload the annotation and masks to Cytomine (annotations are extracted from the mask using
