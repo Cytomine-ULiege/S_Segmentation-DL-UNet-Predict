@@ -30,7 +30,7 @@ def load_data(cj, dims, path, **monitor_params):
     for i, image_name in cj.monitor(enumerate(images), **monitor_params):
         img = cv2.imread(os.path.join(path, image_name))
         imgs[i, :, :, :] = cv2.resize(img, (dims[1], dims[0]))
-    return images
+    return imgs
 
 
 def create_unet(dims):
